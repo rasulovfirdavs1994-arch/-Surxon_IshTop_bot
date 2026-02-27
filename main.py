@@ -1,125 +1,155 @@
 import os
 import logging
 import time
+import threading
 
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
+from flask import Flask
 
-# ========= CONFIG (Konfiguratsiya) =========
-# Token Render panelida "Environment Variables" bo'limiga qo'shiladi
-API_TOKEN = os.getenv("TOKEN")
+# ================= CONFIG =================
+
+TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = "@surxon_ishtop"
+
+if not TOKEN:
+    raise Exception("TOKEN topilmadi! Render Environment Variables tekshiring.")
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=API_TOKEN)
+bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
 
-# ========= FSM (Holatlar) =========
-class JobForm(StatesGroup):
-    org = State()      # Tashkilot nomi
-    loc = State()      # Manzil
-    pos = State()      # Lavozim
-    salary = State()   # Maosh
-    phone = State()    # Telefon raqami
-    confirm = State()  # Tasdiqlash bosqichi
+# ================= FSM =================
 
-# ========= KEYBOARDS (Klaviaturalar) =========
-def get_confirm_keyboard():
+class JobForm(StatesGroup):
+    org = State()
+    loc = State()
+    pos = State()
+    salary = State()
+    phone = State()
+    confirm = State()
+
+# ================= KEYBOARD =================
+
+def confirm_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("✅ E'lon berish")
     kb.row("✏️ Tahrirlash", "❌ Bekor qilish")
     return kb
 
-# ========= HANDLERS (Buyruqlar va Holatlar) =========
+# ================= HANDLERS =================
 
 @dp.message_handler(commands=["start"], state="*")
 async def start(message: types.Message, state: FSMContext):
     await state.finish()
+
     await message.answer(
-        "👋 **Surxon IshTop** botiga xush kelibsiz!\n\n"
-        "📌 Ish e'lonini joylash uchun: /add_job",
-        parse_mode="Markdown"
+        "👋 Surxon IshTop botiga xush kelibsiz!\n\n"
+        "📌 Ish e'lon berish uchun /add_job ni bosing."
     )
 
-@dp.message_handler(commands=["add_job"], state="*")
+@dp.message_handler(commands=["add_job"])
 async def add_job(message: types.Message):
-    await message.answer("🏢 **Tashkilot nomini kiriting:**", parse_mode="Markdown")
+    await message.answer("🏢 Tashkilot nomini kiriting:")
     await JobForm.org.set()
 
 @dp.message_handler(state=JobForm.org)
-async def process_org(message: types.Message, state: FSMContext):
+async def org_step(message: types.Message, state: FSMContext):
     await state.update_data(org=message.text)
-    await message.answer("📍 **Manzilni kiriting:**", parse_mode="Markdown")
+
+    await message.answer("📍 Manzilni kiriting:")
     await JobForm.loc.set()
 
 @dp.message_handler(state=JobForm.loc)
-async def process_loc(message: types.Message, state: FSMContext):
+async def loc_step(message: types.Message, state: FSMContext):
     await state.update_data(loc=message.text)
-    await message.answer("💼 **Lavozimni kiriting:**", parse_mode="Markdown")
+
+    await message.answer("💼 Lavozimni kiriting:")
     await JobForm.pos.set()
 
 @dp.message_handler(state=JobForm.pos)
-async def process_pos(message: types.Message, state: FSMContext):
+async def pos_step(message: types.Message, state: FSMContext):
     await state.update_data(pos=message.text)
-    await message.answer("💰 **Maoshni kiriting:**", parse_mode="Markdown")
+
+    await message.answer("💰 Maoshni kiriting:")
     await JobForm.salary.set()
 
 @dp.message_handler(state=JobForm.salary)
-async def process_salary(message: types.Message, state: FSMContext):
+async def salary_step(message: types.Message, state: FSMContext):
     await state.update_data(salary=message.text)
-    await message.answer("📞 **Telefon raqamingiz:**", parse_mode="Markdown")
+
+    await message.answer("📞 Telefon raqamingiz:")
     await JobForm.phone.set()
 
 @dp.message_handler(state=JobForm.phone)
-async def process_phone(message: types.Message, state: FSMContext):
+async def phone_step(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
+
     data = await state.get_data()
+
     job_id = int(time.time() % 100000)
     await state.update_data(job_id=job_id)
 
-    preview = (
-        f"📢 **ISH E'LONI (ID: {job_id})**\n\n"
-        f"🏢 **Tashkilot:** {data['org']}\n"
-        f"📍 **Manzil:** {data['loc']}\n"
-        f"💼 **Lavozim:** {data['pos']}\n"
-        f"💰 **Maosh:** {data['salary']}\n"
-        f"📞 **Aloqa:** {message.text}\n\n"
-        f"⚠️ *Ma'lumotlar to'g'rimi?*"
-    )
-    await message.answer(preview, reply_markup=get_confirm_keyboard(), parse_mode="Markdown")
+    preview = f"""
+📢 <b>ISH E'LONI (ID: {job_id})</b>
+
+🏢 Tashkilot: {data['org']}
+📍 Manzil: {data['loc']}
+💼 Lavozim: {data['pos']}
+💰 Maosh: {data['salary']}
+📞 Aloqa: {data['phone']}
+
+⚠️ Ma'lumotlar to'g'rimi?
+"""
+
+    await message.answer(preview, reply_markup=confirm_keyboard(), parse_mode="HTML")
     await JobForm.confirm.set()
 
 @dp.message_handler(lambda m: m.text == "✅ E'lon berish", state=JobForm.confirm)
 async def publish(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    post = (
-        f"📢 #ISH_ELONI (ID: {data['job_id']})\n\n"
-        f"🏢 **Tashkilot:** {data['org']}\n"
-        f"📍 **Manzil:** {data['loc']}\n"
-        f"💼 **Lavozim:** {data['pos']}\n"
-        f"💰 **Maosh:** {data['salary']}\n"
-        f"📞 **Aloqa:** {data['phone']}\n\n"
-        f"🤖 @surxon_ishtop_bot"
-    )
-    try:
-        await bot.send_message(CHANNEL_ID, post, parse_mode="Markdown")
-        await message.answer("✅ **E'lon kanalga joylandi!**", reply_markup=types.ReplyKeyboardRemove())
-    except Exception:
-        await message.answer("❌ **Xatolik:** Bot kanal admini emas!")
-    await state.finish()
 
-@dp.message_handler(lambda m: m.text == "✏️ Tahrirlash", state=JobForm.confirm)
-async def edit_job(message: types.Message):
-    await message.answer("🔄 Tashkilot nomini qaytadan kiriting:", reply_markup=types.ReplyKeyboardRemove())
-    await JobForm.org.set()
+    data = await state.get_data()
+
+    post = f"""
+📢 #ISH_ELONI (ID: {data['job_id']})
+
+🏢 <b>Tashkilot:</b> {data['org']}
+📍 <b>Manzil:</b> {data['loc']}
+💼 <b>Lavozim:</b> {data['pos']}
+💰 <b>Maosh:</b> {data['salary']}
+📞 <b>Aloqa:</b> {data['phone']}
+"""
+
+    try:
+        await bot.send_message(CHANNEL_ID, post, parse_mode="HTML")
+        await message.answer("✅ E'lon kanalga joylandi!")
+    except:
+        await message.answer("❌ Bot kanal admini emas!")
+
+    await state.finish()
 
 @dp.message_handler(lambda m: m.text == "❌ Bekor qilish", state="*")
 async def cancel(message: types.Message, state: FSMContext):
     await state.finish()
-    await message.answer("❌ E'lon berish bekor qilindi.", reply_markup=types.ReplyKeyboardRemove())
+    await message.answer("❌ Bekor qilindi.")
+
+# ================= FLASK HEALTH CHECK =================
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot ishlayapti!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# ================= MAIN =================
 
 if __name__ == "__main__":
+    threading.Thread(target=run_web).start()
     executor.start_polling(dp, skip_updates=True)
